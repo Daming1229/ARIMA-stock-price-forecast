@@ -1,5 +1,5 @@
 """
-ARIMA模型对AAPL股票的自动化分析与预测
+ARIMA模型对AAPL股票的自动化分析与预测（2021-2024年）
 """
 
 import pandas as pd
@@ -20,6 +20,7 @@ import os
 import time
 import glob
 import shutil
+import importlib
 
 # 根据操作系统设置合适的字体
 if platform.system() == 'Windows':
@@ -77,8 +78,8 @@ class ARIMAAnalysis:
         base_url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}"
         params = {
             "apikey": api_key,
-            "from": "2014-01-01",
-            "to": "2017-12-31"
+            "from": "2021-01-01",  # 更新为2021年
+            "to": "2024-12-31"     # 更新为2024年
         }
 
         try:
@@ -119,7 +120,7 @@ class ARIMAAnalysis:
         plt.figure(figsize=(12, 6))
         plt.plot(self.data.index, self.data['adjClose'],
                  label='调整后收盘价')
-        plt.title(f'{self.symbol} 股票价格时间序列')
+        plt.title(f'{self.symbol} 股票价格时间序列 (2021-2024)')  # 更新标题
         plt.xlabel('日期')
         plt.ylabel('价格 (USD)')
         plt.grid(True, alpha=0.3)
@@ -138,7 +139,7 @@ class ARIMAAnalysis:
         plt.figure(figsize=(12, 6))
         plt.plot(self.diff_data.index, self.diff_data['adjClose_diff'],
                  label='一阶差分', color='orange')
-        plt.title(f'{self.symbol} 股票价格一阶差分')
+        plt.title(f'{self.symbol} 股票价格一阶差分 (2021-2024)')  # 更新标题
         plt.xlabel('日期')
         plt.ylabel('差分值')
         plt.grid(True, alpha=0.3)
@@ -157,7 +158,7 @@ class ARIMAAnalysis:
         plt.figure(figsize=(12, 6))
         plt.plot(self.diff2_data.index, self.diff2_data['adjClose_diff2'],
                  label='二阶差分', color='green')
-        plt.title(f'{self.symbol} 股票价格二阶差分')
+        plt.title(f'{self.symbol} 股票价格二阶差分 (2021-2024)')  # 更新标题
         plt.xlabel('日期')
         plt.ylabel('差分值')
         plt.grid(True, alpha=0.3)
@@ -205,7 +206,7 @@ class ARIMAAnalysis:
 
         plt.xlabel('序列类型')
         plt.ylabel('值')
-        plt.title('ADF检验结果')
+        plt.title('ADF检验结果 (2021-2024)')  # 更新标题
         plt.xticks(index + bar_width, results_df['Series'])
         plt.legend()
         plt.tight_layout()
@@ -331,8 +332,8 @@ class ARIMAAnalysis:
         print("\n开始测试不同的ARIMA模型...")
         start_time = time.time()
 
-        # 创建2017年12月1日的预测起点
-        start_date = '2017-12-01'
+        # 创建2024年6月1日的预测起点 (更新为2024年)
+        start_date = '2024-06-01'
         forecast_start = pd.to_datetime(start_date)
 
         # 获取实际数据（7天）
@@ -444,7 +445,7 @@ class ARIMAAnalysis:
                      color=colors[i % len(colors)],
                      label=f'ARIMA{result["Order"]} (MSE={result["MSE"]:.4f})')
 
-        plt.title('不同ARIMA模型的7天预测比较')
+        plt.title('不同ARIMA模型的7天预测比较 (2021-2024数据)')
         plt.xlabel('日期')
         plt.ylabel('股票价格 (USD)')
         plt.legend()
@@ -555,8 +556,8 @@ class ARIMAAnalysis:
         """
         print(f"\n开始进行{steps}天预测 (ARIMA{order})...")
 
-        # 获取2017年12月1日之后的数据进行预测
-        start_date = '2017-12-01'
+        # 获取2024年6月1日之后的数据进行预测 (更新为2024年)
+        start_date = '2024-06-01'
         forecast_start = pd.to_datetime(start_date)
 
         # 分割训练集和测试集
@@ -648,7 +649,7 @@ class ARIMAAnalysis:
                              color='gray', alpha=0.2,
                              label='95%置信区间')
 
-        plt.title(f'{self.symbol} {steps}天股价预测 (ARIMA{order})')
+        plt.title(f'{self.symbol} {steps}天股价预测 (ARIMA{order}) (2021-2024)')  # 更新标题
         plt.xlabel('日期')
         plt.ylabel('价格 (USD)')
         plt.legend()
@@ -867,7 +868,7 @@ class ARIMAAnalysis:
                 }}
                 .image-container {{
                     text-align: center;
-                    margin: 20px 0;
+                    margin: a20px 0;
                 }}
                 img {{
                     max-width: 100%;
@@ -1349,33 +1350,52 @@ class ARIMAAnalysis:
         # 将HTML转换为PDF
         try:
             # 尝试导入必要的模块
-            try:
-                from weasyprint import HTML
-                import tempfile
-            except ImportError:
+            weasyprint_spec = importlib.util.find_spec("weasyprint")
+
+            if weasyprint_spec is None:
                 print("未安装weasyprint库，无法生成PDF报告。请运行: pip install weasyprint")
                 return report_file
 
-            # 创建临时HTML文件（解决相对路径问题）
-            temp_dir = tempfile.mkdtemp()
-            temp_html = os.path.join(temp_dir, "temp_report.html")
+            # WeasyPrint模块已安装，可以导入
+            try:
+                from weasyprint import HTML
+                import tempfile
 
-            # 修改HTML中的图片路径为绝对路径
-            updated_html = html_content.replace('src="', f'src="{report_dir}/')
+                # 创建临时HTML文件（解决相对路径问题）
+                temp_dir = tempfile.mkdtemp()
+                temp_html = os.path.join(temp_dir, "temp_report.html")
 
-            with open(temp_html, 'w', encoding='utf-8') as f:
-                f.write(updated_html)
+                # 修改HTML中的图片路径为绝对路径
+                updated_html = html_content.replace('src="', f'src="{report_dir}/')
 
-            # 生成PDF
-            HTML(temp_html).write_pdf(pdf_file)
-            print(f"PDF分析报告已生成：{pdf_file}")
+                with open(temp_html, 'w', encoding='utf-8') as f:
+                    f.write(updated_html)
 
-            # 清理临时文件
-            os.remove(temp_html)
-            os.rmdir(temp_dir)
-
+                try:
+                    # 生成PDF
+                    HTML(temp_html).write_pdf(pdf_file)
+                    print(f"PDF分析报告已生成：{pdf_file}")
+                except Exception as e:
+                    print(f"生成PDF失败: {str(e)}")
+                    print("原因可能是缺少系统级依赖，如Pango、Cairo等。")
+                    print("在macOS上，您可以通过Homebrew安装这些依赖: brew install pango cairo")
+                    print("请参考WeasyPrint文档: https://doc.courtbouillon.org/weasyprint/stable/first_steps.html")
+                    print("将只生成HTML报告。")
+                    return report_file
+                finally:
+                    # 清理临时文件
+                    try:
+                        os.remove(temp_html)
+                        os.rmdir(temp_dir)
+                    except:
+                        pass
+            except ImportError as e:
+                print(f"导入WeasyPrint模块时出错: {str(e)}")
+                print("将只生成HTML报告。")
+                return report_file
         except Exception as e:
             print(f"生成PDF报告时出错: {str(e)}")
+            print("将只生成HTML报告。")
 
         return report_file
 
@@ -1384,8 +1404,8 @@ def main():
     """
     主函数
     """
-    base_path = '/Users/quyou/Desktop/毕业设计/cursor测试'
-    api_key = "qhylk6wN8OUWTgmLddldoMRPCo59NmBU"
+    base_path = '/Users/quyou/Desktop/毕业设计/ARIMA应用方向/AAPL_2021_2024'
+    api_key = "qhylk6wN8OUWTgmLddldoMRPCo59NmBU"  # 请确保使用有效的API密钥
     symbol = "AAPL"
 
     try:
@@ -1442,14 +1462,14 @@ def main():
                 for order in additional_orders:
                     try:
                         print(f"测试ARIMA{order}...")
-                        model = ARIMA(analysis.data['adjClose'][:pd.to_datetime('2017-12-01')], order=order)
+                        model = ARIMA(analysis.data['adjClose'][:pd.to_datetime('2024-06-01')], order=order)  # 更新为2024年
                         model_fit = model.fit()
 
                         # 预测
                         alt_forecast = model_fit.forecast(steps=steps)
 
                         # 计算MAPE
-                        actual = analysis.data['adjClose'][pd.to_datetime('2017-12-01'):][:steps]
+                        actual = analysis.data['adjClose'][pd.to_datetime('2024-06-01'):][:steps]  # 更新为2024年
                         min_length = min(len(actual), len(alt_forecast))
                         actual = actual[:min_length]
                         alt_forecast = alt_forecast[:min_length]
@@ -1492,4 +1512,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    main() 
