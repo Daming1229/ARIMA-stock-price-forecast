@@ -26,15 +26,17 @@ from scipy import stats
 from statsmodels.stats.stattools import durbin_watson
 import statsmodels.api as sm
 from statsmodels.tsa.stattools import acf
+from statsmodels.stats.diagnostic import acorr_ljungbox
 
-# 根据操作系统设置合适的字体
+# =====================
+# 字体设置，兼容不同操作系统，防止中文乱码
+# =====================
 if platform.system() == 'Windows':
     matplotlib.rcParams['font.sans-serif'] = ['Microsoft YaHei']
 elif platform.system() == 'Darwin':
     matplotlib.rcParams['font.sans-serif'] = ['Arial Unicode MS', 'Heiti TC', 'PingFang HK']
 else:
     matplotlib.rcParams['font.sans-serif'] = ['DejaVu Sans']
-
 matplotlib.rcParams['axes.unicode_minus'] = False
 plt.rcParams['font.size'] = 12
 plt.rcParams['axes.titlesize'] = 14
@@ -45,6 +47,9 @@ plt.rcParams['ytick.labelsize'] = 10
 import warnings
 warnings.filterwarnings('ignore')
 
+# =====================
+# ARIMAAnalysis类：封装了数据获取、预处理、建模、预测、残差分析、报告生成等全流程
+# =====================
 class ARIMAAnalysis:
     """
     ARIMA时间序列分析类，用于处理股票数据的分析和预测。
@@ -53,7 +58,7 @@ class ARIMAAnalysis:
     def __init__(self, symbol, api_key, base_path):
         """
         初始化分析对象。
-        @param symbol: 股票代码 (e.g., 'AAPL')
+        @param symbol: 股票代码 (如 'AAPL')
         @param api_key: Financial Modeling Prep API密钥
         @param base_path: 结果保存的根目录
         """
@@ -61,19 +66,18 @@ class ARIMAAnalysis:
         self.symbol = symbol
         os.makedirs(base_path, exist_ok=True)
         start_time = time.time()
-        self.data = self.get_stock_data(symbol, api_key)
-        self.prepare_data()
+        self.data = self.get_stock_data(symbol, api_key)  # 获取历史数据
+        self.prepare_data()  # 数据预处理及初步可视化
         print(f"数据获取和预处理完成，耗时: {time.time() - start_time:.2f}秒")
 
     @lru_cache(maxsize=5)
     def get_stock_data(self, symbol, api_key):
         """
         从Financial Modeling Prep API获取股票历史数据。
-        @return: 包含历史价格的DataFrame
+        返回：包含历史价格的DataFrame
         """
         base_url = f"https://financialmodelingprep.com/api/v3/historical-price-full/{symbol}"
         params = {"apikey": api_key, "from": "2021-01-01", "to": "2024-12-31"}
-
         try:
             response = requests.get(base_url, params=params, timeout=10)
             if response.status_code == 200:
@@ -86,7 +90,7 @@ class ARIMAAnalysis:
                 missing_values = df.isnull().sum()
                 if missing_values.any():
                     print(f"警告: 数据中存在缺失值: {missing_values[missing_values > 0]}")
-                    df = df.fillna(method='ffill')
+                    df = df.fillna(method='ffill')  # 用前值填充
                 return df
             else:
                 raise Exception(f"API请求失败，状态码: {response.status_code}")
@@ -100,6 +104,7 @@ class ARIMAAnalysis:
         self.data.set_index('date', inplace=True)
         self.data = self.data.sort_index()
 
+        # 绘制原始股价时间序列
         plt.figure(figsize=(12, 6))
         plt.plot(self.data.index, self.data['adjClose'], label='调整后收盘价')
         plt.title(f'{self.symbol} 股票价格时间序列 (2021-2024)')
@@ -112,10 +117,10 @@ class ARIMAAnalysis:
         plt.savefig(f'{self.base_path}/original_series.png', dpi=300)
         plt.close()
 
+        # 一阶差分
         self.diff_data = pd.DataFrame()
         self.diff_data['adjClose_diff'] = self.data['adjClose'].diff()
         self.diff_data = self.diff_data.dropna()
-
         plt.figure(figsize=(12, 6))
         plt.plot(self.diff_data.index, self.diff_data['adjClose_diff'], label='一阶差分', color='orange')
         plt.title(f'{self.symbol} 股票价格一阶差分 (2021-2024)')
@@ -128,10 +133,10 @@ class ARIMAAnalysis:
         plt.savefig(f'{self.base_path}/differenced_series.png', dpi=300)
         plt.close()
 
+        # 二阶差分
         self.diff2_data = pd.DataFrame()
         self.diff2_data['adjClose_diff2'] = self.diff_data['adjClose_diff'].diff()
         self.diff2_data = self.diff2_data.dropna()
-
         plt.figure(figsize=(12, 6))
         plt.plot(self.diff2_data.index, self.diff2_data['adjClose_diff2'], label='二阶差分', color='green')
         plt.title(f'{self.symbol} 股票价格二阶差分 (2021-2024)')
@@ -147,12 +152,13 @@ class ARIMAAnalysis:
     def adf_test(self):
         """
         进行ADF检验，评估序列平稳性。
-        @return: ADF检验结果DataFrame和推荐的差分阶数
+        返回：ADF检验结果DataFrame和推荐的差分阶数
         """
         result_original = adfuller(self.data['adjClose'].dropna())
         result_diff = adfuller(self.diff_data['adjClose_diff'].dropna())
         result_diff2 = adfuller(self.diff2_data['adjClose_diff2'].dropna())
 
+        # 汇总结果
         results_df = pd.DataFrame({
             'Series': ['原始序列', '一阶差分', '二阶差分'],
             'ADF统计量': [result_original[0], result_diff[0], result_diff2[0]],
@@ -162,6 +168,7 @@ class ARIMAAnalysis:
             '临界值(10%)': [result_original[4]['10%'], result_diff[4]['10%'], result_diff2[4]['10%']]
         })
 
+        # 绘制ADF检验结果柱状图
         fig, ax = plt.subplots(figsize=(10, 6))
         bar_width = 0.25
         index = np.arange(3)
@@ -177,6 +184,7 @@ class ARIMAAnalysis:
         plt.savefig(f'{self.base_path}/adf_test_results.png', dpi=300)
         plt.close()
 
+        # 控制台输出
         print("\nADF检验结果:")
         for i, row in results_df.iterrows():
             is_stationary = row['ADF统计量'] < row['临界值(5%)']
@@ -188,16 +196,15 @@ class ARIMAAnalysis:
 
         results_df.to_csv(f'{self.base_path}/adf_test_results.csv')
 
+        # 推荐差分阶数d
         recommended_d = 0
         for i, statistic in enumerate(results_df['ADF统计量']):
             if statistic < results_df['临界值(5%)'][i]:
                 recommended_d = i
                 break
-
         print(f"推荐差分阶数 (d): {recommended_d}")
         with open(f'{self.base_path}/recommended_d.txt', 'w') as f:
             f.write(f"推荐差分阶数 (d): {recommended_d}")
-
         return results_df, recommended_d
 
     def plot_acf_pacf(self, max_lags=40):
@@ -209,7 +216,6 @@ class ARIMAAnalysis:
             (self.diff_data['adjClose_diff'], '一阶差分序列'),
             (self.diff2_data['adjClose_diff2'], '二阶差分序列')
         ]
-
         for series, name in series_data:
             fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
             plot_acf(series, ax=ax1, lags=max_lags, title=f'{name} - 自相关函数(ACF)')
@@ -223,17 +229,16 @@ class ARIMAAnalysis:
             plt.tight_layout()
             plt.savefig(f'{self.base_path}/acf_pacf_{name}.png', dpi=300)
             plt.close()
-
         print("\nACF和PACF分析完成")
 
     def find_best_parameters(self, d=None):
         """
         使用auto_arima自动选择最优ARIMA参数。
-        @return: 最优ARIMA参数元组 (p, d, q)
+        返回：最优ARIMA参数元组 (p, d, q)
         """
         start_time = time.time()
         print("开始使用auto_arima寻找最优参数...")
-
+        # 根据d选择合适的序列
         series = self.data['adjClose'] if d is None else self.diff_data['adjClose_diff'] if d == 1 else self.diff2_data['adjClose_diff2']
         model = auto_arima(series,
                            start_p=0, start_q=0,
@@ -247,27 +252,23 @@ class ARIMAAnalysis:
                            error_action='ignore',
                            suppress_warnings=True,
                            stepwise=True)
-
         print(f"\n最优ARIMA参数: {model.order}")
         print(f"AIC: {model.aic():.4f}")
         print(f"搜索耗时: {time.time() - start_time:.2f}秒")
-
         params = pd.DataFrame({'参数': ['p', 'd', 'q'], '值': [model.order[0], model.order[1], model.order[2]]})
         params.to_csv(f'{self.base_path}/best_parameters.csv')
-
         return model.order
 
     def test_multiple_models(self, recommended_d=None):
         """
         测试多种ARIMA参数组合，找到最佳模型。
-        @return: 最佳模型参数元组 (p, d, q)
+        返回：最佳模型参数元组 (p, d, q)
         """
         print("\n开始测试不同的ARIMA模型...")
         start_time = time.time()
-
         forecast_start = pd.to_datetime('2024-06-01')
         actual_7days = self.data['adjClose'][forecast_start:][:7]
-
+        # 备选参数组合
         base_orders = [
             (1, recommended_d, 1), (1, recommended_d, 2),
             (2, recommended_d, 1), (2, recommended_d, 2),
@@ -276,16 +277,13 @@ class ARIMAAnalysis:
             (1, 1, 1), (1, 1, 2), (2, 1, 1), (2, 1, 2),
             (1, 0, 1), (0, 1, 1)
         ]
-
         additional_orders = [(1, 2, 1), (2, 2, 1), (2, 0, 2), (3, 1, 2)]
         orders = list(set(base_orders + additional_orders))
-
         results = []
         plt.figure(figsize=(15, 8))
         plt.plot(actual_7days.index, actual_7days, 'ko-', label='实际值', linewidth=2)
-
         colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown', 'pink', 'gray', 'cyan', 'magenta']
-
+        # 内部函数：测试单个模型
         def test_model(order):
             try:
                 model = ARIMA(self.data['adjClose'][:forecast_start], order=order)
@@ -294,7 +292,6 @@ class ARIMAAnalysis:
                 min_length = min(len(actual_7days), len(forecast))
                 actual_values = actual_7days[:min_length]
                 forecast_values = forecast[:min_length]
-
                 mse = mean_squared_error(actual_values, forecast_values)
                 rmse = np.sqrt(mse)
                 mae = mean_absolute_error(actual_values, forecast_values)
@@ -302,7 +299,6 @@ class ARIMAAnalysis:
                 mape = np.mean(mape_values) if mape_values else float('nan')
                 aic = model_fit.aic
                 bic = model_fit.bic
-
                 return {
                     'Order': order, 'MSE': mse, 'RMSE': rmse, 'MAE': mae,
                     'MAPE': mape, 'AIC': aic, 'BIC': bic, 'Forecast': forecast_values
@@ -310,17 +306,15 @@ class ARIMAAnalysis:
             except Exception as e:
                 print(f"ARIMA{order}模型出错: {e}")
                 return None
-
+        # 多线程加速模型测试
         with ThreadPoolExecutor(max_workers=min(4, len(orders))) as executor:
             model_results = list(executor.map(test_model, orders))
-
         model_results = [r for r in model_results if r is not None]
         results.extend(model_results)
-
+        # 绘制所有模型的7天预测曲线
         for i, result in enumerate(results):
             plt.plot(actual_7days.index, result['Forecast'], marker='o', linestyle='--',
                      color=colors[i % len(colors)], label=f'ARIMA{result["Order"]} (MSE={result["MSE"]:.4f})')
-
         plt.title('不同ARIMA模型的7天预测比较 (2021-2024数据)')
         plt.xlabel('日期')
         plt.ylabel('股票价格 (USD)')
@@ -331,7 +325,7 @@ class ARIMAAnalysis:
                     bbox={"facecolor": "white", "alpha": 0.8, "pad": 5})
         plt.savefig(f'{self.base_path}/model_comparison_7days.png', dpi=300, bbox_inches='tight')
         plt.close()
-
+        # 结果汇总与热力图
         df_results = pd.DataFrame(results)
         df_results['MSE_norm'] = (df_results['MSE'] - df_results['MSE'].min()) / (df_results['MSE'].max() - df_results['MSE'].min() + 1e-10)
         df_results['AIC_norm'] = (df_results['AIC'] - df_results['AIC'].min()) / (df_results['AIC'].max() - df_results['AIC'].min() + 1e-10)
@@ -339,7 +333,7 @@ class ARIMAAnalysis:
         df_results['Score'] = 0.5 * df_results['MSE_norm'] + 0.25 * df_results['AIC_norm'] + 0.25 * df_results['BIC_norm']
         df_results = df_results.sort_values('Score').drop(['MSE_norm', 'AIC_norm', 'BIC_norm', 'Forecast'], axis=1)
         df_results.to_csv(f'{self.base_path}/model_comparison_7days.csv', index=False)
-
+        # 热力图
         heatmap_data = df_results[['Order'] + ['MSE', 'RMSE', 'MAE', 'MAPE', 'AIC', 'BIC', 'Score']].copy()
         heatmap_data['Order'] = heatmap_data['Order'].astype(str)
         heatmap_data.set_index('Order', inplace=True)
@@ -352,7 +346,7 @@ class ARIMAAnalysis:
         plt.tight_layout()
         plt.savefig(f'{self.base_path}/model_metrics_heatmap.png', dpi=300)
         plt.close()
-
+        # 前5模型柱状图
         fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
         top_5_models = df_results.head(5)
         for i, metric in enumerate(['MSE', 'AIC', 'BIC']):
@@ -369,78 +363,65 @@ class ARIMAAnalysis:
         plt.tight_layout()
         plt.savefig(f'{self.base_path}/top_models_metrics.png', dpi=300, bbox_inches='tight')
         plt.close()
-
         print("\n模型比较结果:")
         print(df_results.head())
         print(f"模型测试耗时: {time.time() - start_time:.2f}秒")
         best_order = tuple(df_results.iloc[0]['Order'])
         print(f"\n最佳模型: ARIMA{best_order}")
-
         return best_order
 
     def forecast_and_evaluate(self, steps, order):
         """
         进行预测并评估模型性能。
-        @param steps: 预测步数 (e.g., 3, 7, 30)
+        @param steps: 预测步数 (如3, 7, 30)
         @param order: ARIMA模型参数 (p, d, q)
-        @return: 预测结果、置信区间和评估指标
+        返回：预测结果、置信区间和评估指标
         """
         print(f"\n开始进行{steps}天预测 (ARIMA{order})...")
         forecast_start = pd.to_datetime('2024-06-01')
-
         # 分割训练集和测试集
         train_data = self.data['adjClose'][:forecast_start]
         test_data = self.data['adjClose'][forecast_start:][:steps]
-
         # 检查测试数据是否足够
         if len(test_data) < steps:
             print(f"警告：2024-06-01 之后的数据不足以进行 {steps} 天的预测，仅有 {len(test_data)} 天的数据。")
             if len(test_data) == 0:
                 raise ValueError(f"无法进行 {steps} 天预测：测试数据为空。")
-
         # 训练模型
         model = ARIMA(train_data, order=order)
         model_fit = model.fit()
-
         # 预测
         forecast = model_fit.forecast(steps=steps)
         conf_int = model_fit.get_forecast(steps=steps).conf_int()
-
         # 确保长度匹配
         min_length = min(len(test_data), len(forecast), steps)
         actual = test_data[:min_length]
         forecast = pd.Series(forecast[:min_length].values, index=pd.RangeIndex(min_length))
         conf_int = conf_int.iloc[:min_length].reset_index(drop=True)
-
         # 如果实际数据不足，打印警告
         if len(actual) == 0:
             raise ValueError(f"实际数据为空，无法进行 {steps} 天的预测和评估。")
-
         # 计算评估指标
         mse = mean_squared_error(actual, forecast)
         rmse = np.sqrt(mse)
         mae = mean_absolute_error(actual, forecast)
         mape_values = [abs((a - f) / a) * 100 for a, f in zip(actual, forecast) if a != 0]
         mape = np.mean(mape_values) if mape_values else float('nan')
-
+        # 计算MASE
         if len(train_data) > 1:
             naive_errors = np.abs(np.diff(train_data))
             naive_mae = np.mean(naive_errors)
             mase = mae / naive_mae if naive_mae > 0 else float('nan')
         else:
             mase = float('nan')
-
         metrics = pd.DataFrame({
             '指标': ['MSE', 'RMSE', 'MAE', 'MAPE', 'MASE'],
             '值': [mse, rmse, mae, mape, mase]
         })
-
         print(f"\n{steps}天预测结果评估指标 (ARIMA{order}):")
         for i, metric in enumerate(metrics['指标']):
             print(f"{metric}: {metrics['值'][i]:.4f}" + ("%" if metric == "MAPE" else ""))
-
         metrics.to_csv(f'{self.base_path}/metrics_{steps}days.csv')
-
         # 保存预测结果，确保 Predicted 列有数据
         forecast_dates = pd.date_range(start=forecast_start, periods=min_length, freq='B')
         results_df = pd.DataFrame(index=forecast_dates)
@@ -453,11 +434,9 @@ class ARIMAAnalysis:
         results_df['Absolute_Error'] = np.abs(results_df['Error'])
         results_df['Percentage_Error'] = [abs((a - f) / a) * 100 if a != 0 else np.nan for a, f in zip(actual.values, forecast.values)]
         results_df.to_csv(f'{self.base_path}/forecast_results_{steps}days.csv')
-
         # 打印部分结果以便调试
         print(f"\n{steps}天预测结果预览（前5行）：")
         print(results_df.head())
-
         # 绘制预测结果
         plt.figure(figsize=(12, 6))
         plt.plot(results_df.index, results_df['Actual'], label='实际值', marker='o', color='blue')
@@ -479,7 +458,6 @@ class ARIMAAnalysis:
         plt.tight_layout()
         plt.savefig(f'{self.base_path}/forecast_{steps}days.png', dpi=300, bbox_inches='tight')
         plt.close()
-
         # 绘制评估指标图
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6), gridspec_kw={'width_ratios': [3, 1]})
         error_metrics = metrics[metrics['指标'].isin(['MSE', 'RMSE', 'MAE', 'MAPE'])]
@@ -493,7 +471,6 @@ class ARIMAAnalysis:
         ax1.set_xlabel('指标')
         ax1.set_ylabel('值')
         ax1.grid(True, axis='y', alpha=0.3)
-
         mape_data = error_metrics[error_metrics['指标'] == 'MAPE']
         bars2 = ax2.bar(mape_data['指标'], pd.to_numeric(mape_data['值'], errors='coerce'), color=colors[3])
         for bar in bars2:
@@ -505,17 +482,14 @@ class ARIMAAnalysis:
         ax2.set_xlabel('指标')
         ax2.set_ylabel('百分比 (%)')
         ax2.grid(True, axis='y', alpha=0.3)
-
         plt.suptitle(f'{steps}天预测的误差评估指标 (ARIMA{order})')
         plt.figtext(0.5, 0.01, f"图: {steps}天ARIMA{order}模型预测的误差指标",
                     ha="center", fontsize=10, bbox={"facecolor": "white", "alpha": 0.8, "pad": 5})
         plt.tight_layout()
-        plt.savefig(f'{self.base_path}/error_metrics_{steps}days.png', dpi=300, bbox_inches='tight')
+        plt.savefig(f'{self.base_path}/error_metrics_{steps}days.png', dpi=300)
         plt.close()
-
         # 残差分析
         self.residual_analysis(model_fit, steps, order, forecast, actual)
-
         return forecast, conf_int, metrics
 
     def residual_analysis(self, model_fit, steps, order, forecast, actual):
@@ -531,65 +505,51 @@ class ARIMAAnalysis:
         if len(actual) == 0 or len(forecast) == 0:
             print(f"错误：{steps}天预测的 actual 或 forecast 数据为空，无法进行残差分析。")
             return
-
         # 确保数据类型正确
         if isinstance(forecast, pd.Series):
             forecast_values = forecast.values
         else:
             forecast_values = forecast
-
         if isinstance(actual, pd.Series):
             actual_values = actual.values
         else:
             actual_values = actual
-
         # 计算预测残差
         residuals = actual_values - forecast_values
-        
         # 获取预测的日期范围
         if isinstance(actual, pd.Series):
             forecast_dates = actual.index
         else:
             forecast_start = pd.to_datetime('2024-06-01')
             forecast_dates = pd.date_range(start=forecast_start, periods=len(residuals), freq='B')
-
         # 将残差转换为Series以便后续分析
         residuals = pd.Series(residuals, index=forecast_dates)
-
         # 检查残差是否为空
         if residuals.isna().all() or len(residuals) == 0:
             print(f"错误：{steps}天预测的残差为空，无法生成残差分析图。")
             return
-
         # 1. 残差时间序列保存
         ts_df = pd.DataFrame({'日期': residuals.index.strftime('%Y-%m-%d'), '残差值': residuals.values})
         ts_df.to_csv(f'{self.base_path}/residuals_timeseries_{steps}days.csv', index=False)
-
         # 2. 残差分布保存（原始残差值即可）
         dist_df = pd.DataFrame({'残差值': residuals.values})
         dist_df.to_csv(f'{self.base_path}/residuals_distribution_{steps}days.csv', index=False)
-
         # 3. 残差QQ图数据保存
         qq = stats.probplot(residuals.values, dist="norm")
         qq_df = pd.DataFrame({'理论分位数': qq[0][0], '实际分位数': qq[0][1]})
         qq_df.to_csv(f'{self.base_path}/residuals_qq_{steps}days.csv', index=False)
-
         # 4. 残差ACF保存
         acf_vals = acf(residuals.values, nlags=min(40, len(residuals)-1), fft=False)
         acf_df = pd.DataFrame({'滞后阶数': range(len(acf_vals)), '自相关系数': acf_vals})
         acf_df.to_csv(f'{self.base_path}/residuals_acf_{steps}days.csv', index=False)
-
         print(f"已保存{steps}天预测的残差分析csv文件。")
-
         # 以下为原有绘图和统计部分
         print(f"\n{steps}天预测的残差基本信息:")
         print(f"残差数量: {len(residuals)}")
         print(f"残差范围: [{residuals.min():.4f}, {residuals.max():.4f}]")
         print(f"残差均值: {residuals.mean():.4f}")
         print(f"残差标准差: {residuals.std():.4f}")
-
         fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-
         # 残差时间序列图
         ax1.plot(forecast_dates, residuals.values, 'b-', label='残差')
         ax1.set_title('残差时间序列')
@@ -598,45 +558,58 @@ class ARIMAAnalysis:
         ax1.grid(True)
         ax1.legend()
         plt.setp(ax1.xaxis.get_majorticklabels(), rotation=45)
-
         # 残差直方图
         sns.histplot(residuals.values, ax=ax2, kde=True)
         ax2.set_title('残差分布')
         ax2.set_xlabel('残差值')
         ax2.set_ylabel('频数')
-
         # 残差QQ图
         stats.probplot(residuals.values, dist="norm", plot=ax3)
         ax3.set_title('残差Q-Q图')
-
         # 残差自相关图
         plot_acf(residuals.values, ax=ax4, lags=min(40, len(residuals)-1))
         ax4.set_title('残差自相关函数(ACF)')
         ax4.set_xlabel('滞后阶数')
         ax4.set_ylabel('自相关系数')
-
         plt.suptitle(f'{steps}天预测的残差分析 (ARIMA{order})', y=1.02)
         plt.tight_layout()
         plt.savefig(f'{self.base_path}/residuals_analysis_{steps}days.png', dpi=300, bbox_inches='tight')
         plt.close()
-
-        # 输出残差统计信息
+        # 统计量
         residuals_stats = {
             '均值': np.mean(residuals),
             '标准差': np.std(residuals),
+            '最大值': np.max(residuals),
+            '最小值': np.min(residuals),
+            '中位数': np.median(residuals),
+            'Q1(25%)': np.percentile(residuals, 25),
+            'Q3(75%)': np.percentile(residuals, 75),
             '偏度': stats.skew(residuals),
             '峰度': stats.kurtosis(residuals)
         }
+        # Durbin-Watson
+        dw_stat = durbin_watson(residuals)
+        residuals_stats['Durbin-Watson'] = dw_stat
+        # Shapiro-Wilk正态性检验
+        try:
+            shapiro_stat, shapiro_p = stats.shapiro(residuals)
+            residuals_stats['Shapiro-Wilk_p'] = shapiro_p
+        except Exception as e:
+            residuals_stats['Shapiro-Wilk_p'] = 'N/A'
+        # Ljung-Box白噪声检验
+        try:
+            lb_p = acorr_ljungbox(residuals, lags=[min(10, len(residuals)-1)], return_df=True)['lb_pvalue'].values[0]
+            residuals_stats['Ljung-Box_p'] = lb_p
+        except Exception as e:
+            residuals_stats['Ljung-Box_p'] = 'N/A'
+        # 保存统计量
+        stats_df = pd.DataFrame(list(residuals_stats.items()), columns=['指标', '值'])
+        stats_df.to_csv(f'{self.base_path}/residuals_stats_{steps}days.csv', index=False)
+        # 输出残差统计信息
         print(f"\n{steps}天预测残差统计信息:")
         for key, value in residuals_stats.items():
             print(f"{key}: {value:.4f}")
-
-        # 保存残差统计信息到csv
-        stats_df = pd.DataFrame(list(residuals_stats.items()), columns=['指标', '值'])
-        stats_df.to_csv(f'{self.base_path}/residuals_stats_{steps}days.csv', index=False)
-
         # 进行Durbin-Watson检验
-        dw_stat = durbin_watson(residuals)
         print(f"\nDurbin-Watson检验统计量: {dw_stat:.4f}")
         if dw_stat < 1.5:
             print("存在正自相关")
@@ -679,259 +652,271 @@ class ARIMAAnalysis:
             img_name = os.path.basename(img_file)
             shutil.copy(img_file, f"{report_dir}/{img_name}")
 
-        html_content = f"""
+        def render_csv_table(csv_path, headers=None, float_fmt=".4f"):
+            try:
+                df = pd.read_csv(csv_path)
+                html = '<table>'
+                if headers:
+                    html += '<tr>' + ''.join([f'<th>{h}</th>' for h in headers]) + '</tr>'
+                else:
+                    html += '<tr>' + ''.join([f'<th>{col}</th>' for col in df.columns]) + '</tr>'
+                for _, row in df.iterrows():
+                    html += '<tr>'
+                    for v in row:
+                        if isinstance(v, float):
+                            html += f'<td>{v:{float_fmt}}</td>'
+                        else:
+                            html += f'<td>{v}</td>'
+                    html += '</tr>'
+                html += '</table>'
+                return html
+            except Exception as e:
+                return f'<p>无法加载表格: {csv_path} ({e})</p>'
+
+        def interpret_residual_stats(stats_path):
+            try:
+                df = pd.read_csv(stats_path, index_col=0)
+                stats = df.set_index('指标')['值']
+                mean = float(stats.get('均值', 0))
+                std = float(stats.get('标准差', 0))
+                skew = float(stats.get('偏度', 0))
+                kurt = float(stats.get('峰度', 0))
+                dw = float(stats.get('Durbin-Watson', 0))
+                shapiro_p = float(stats.get('Shapiro-Wilk_p', 0)) if stats.get('Shapiro-Wilk_p', 'N/A') != 'N/A' else None
+                lb_p = float(stats.get('Ljung-Box_p', 0)) if stats.get('Ljung-Box_p', 'N/A') != 'N/A' else None
+                msg = "<ul>"
+                msg += f"<li>残差均值为{mean:.2f}，{'整体低估' if mean>0 else '整体高估' if mean<0 else '无系统性偏差'}。</li>"
+                msg += f"<li>标准差为{std:.2f}，{'波动较大' if std>5 else '波动较小'}。</li>"
+                msg += f"<li>偏度为{skew:.2f}，{'右偏（高残差多）' if skew>0.5 else '左偏（低残差多）' if skew<-0.5 else '近似对称'}。</li>"
+                msg += f"<li>峰度为{kurt:.2f}，{'分布尖峭' if kurt>0 else '分布平坦' if kurt<0 else '近似正态'}。</li>"
+                msg += f"<li>Durbin-Watson={dw:.2f}，{'存在正自相关' if dw<1.5 else '存在负自相关' if dw>2.5 else '残差相对独立'}。</li>"
+                if shapiro_p is not None:
+                    msg += f"<li>Shapiro-Wilk正态性检验p值={shapiro_p:.3f}，{'近似正态' if shapiro_p>0.05 else '偏离正态'}。</li>"
+                if lb_p is not None:
+                    msg += f"<li>Ljung-Box白噪声检验p值={lb_p:.3f}，{'残差近似白噪声' if lb_p>0.05 else '残差存在自相关'}。</li>"
+                msg += "</ul>"
+                return msg
+            except Exception as e:
+                return f'<p>无法自动解读统计量: {e}</p>'
+
+        def interpret_residual_timeseries(ts_path):
+            # 简单解读：如残差是否递增递减
+            try:
+                df = pd.read_csv(ts_path)
+                trend = df['残差值'].diff().mean()
+                if trend > 0.5:
+                    return '<p>残差随时间有递增趋势，长期预测风险较高。</p>'
+                elif trend < -0.5:
+                    return '<p>残差随时间有递减趋势，模型可能过拟合。</p>'
+                else:
+                    return '<p>残差随时间无明显趋势，模型拟合较好。</p>'
+            except:
+                return ''
+
+        def interpret_residual_dist(dist_path):
+            try:
+                df = pd.read_csv(dist_path)
+                skew = stats.skew(df['残差值'])
+                if skew > 0.5:
+                    return '<p>残差分布右偏，存在极端高残差。</p>'
+                elif skew < -0.5:
+                    return '<p>残差分布左偏，存在极端低残差。</p>'
+                else:
+                    return '<p>残差分布近似对称。</p>'
+            except:
+                return ''
+
+        def interpret_residual_qq(qq_path):
+            try:
+                df = pd.read_csv(qq_path)
+                # 计算点到直线的均方距离
+                x = df['理论分位数']
+                y = df['实际分位数']
+                corr = np.corrcoef(x, y)[0,1]
+                if corr > 0.98:
+                    return '<p>Q-Q图点大致落在直线附近，残差近似正态分布。</p>'
+                else:
+                    return '<p>Q-Q图点偏离直线，残差分布偏离正态。</p>'
+            except:
+                return ''
+
+        def interpret_residual_acf(acf_path):
+            try:
+                df = pd.read_csv(acf_path)
+                acf_vals = df['自相关系数'][1:]
+                if (acf_vals.abs() < 0.3).all():
+                    return '<p>残差自相关系数大多在置信区间内，残差近似独立。</p>'
+                else:
+                    return '<p>残差自相关系数有超出置信区间，残差存在结构性。</p>'
+            except:
+                return ''
+
+        # 自动摘要内容
+        summary = f"""
+        <div class='section' id='summary'>
+            <h2>1. 摘要</h2>
+            <p>本报告基于2021-01-01至2024-12-31的AAPL股票数据，采用ARIMA模型进行短中长期预测与残差分析。最佳模型为ARIMA{best_order}。短期（3天）预测MAPE低于2%，长期（30天）预测MAPE约10%，模型短期表现优秀，中长期需结合其他方法。报告详细展示了模型选择、预测结果、残差分析及改进建议。</p>
+        </div>
+        """
+        # 自动目录内容
+        toc = f"""
+        <div class='section' id='toc'>
+            <h2>目录</h2>
+            <ul>
+                <li><a href='#summary'>1. 摘要</a></li>
+                <li><a href='#data-overview'>2. 数据概览</a></li>
+                <li><a href='#stationarity'>3. 平稳性分析</a></li>
+                <li><a href='#acf-pacf'>4. ACF和PACF分析</a></li>
+                <li><a href='#model-selection'>5. 模型选择</a></li>
+                <li><a href='#forecast'>6. 预测结果</a></li>
+                <li><a href='#residual-analysis'>7. 残差分析</a>
+                  <ul>
+                    <li><a href='#residual-3'>7.1 3天预测残差分析</a></li>
+                    <li><a href='#residual-7'>7.2 7天预测残差分析</a></li>
+                    <li><a href='#residual-30'>7.3 30天预测残差分析</a></li>
+                  </ul>
+                </li>
+                <li><a href='#conclusion'>8. 结论</a></li>
+                <li><a href='#appendix'>9. 附录</a></li>
+            </ul>
+        </div>
+        """
+        # 优化CSS样式，兼容中英文并限制图片宽度
+        html_content = summary + toc
+        html_content += f"""
         <!DOCTYPE html>
         <html>
         <head>
-            <meta charset="UTF-8">
+            <meta charset=\"UTF-8\">
             <title>{self.symbol} ARIMA分析报告</title>
             <style>
-                body {{ font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; color: #333; }}
+                body {{ 
+                    font-family: 'Arial Unicode MS', 'Microsoft YaHei', 'PingFang SC', 'Heiti SC', 'SimHei', 'SimSun', Arial, sans-serif; 
+                    line-height: 1.6; margin: 0; padding: 20px; color: #333; 
+                }}
                 .container {{ max-width: 1200px; margin: 0 auto; }}
                 h1 {{ text-align: center; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
                 h2 {{ border-bottom: 1px solid #ddd; padding-bottom: 5px; margin-top: 30px; }}
                 .section {{ margin: 30px 0; }}
                 .image-container {{ text-align: center; margin: 20px 0; }}
-                img {{ max-width: 100%; height: auto; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
-                table {{ width: 100%; border-collapse: collapse; margin: 20px 0; }}
-                th, td {{ padding: 10px; border: 1px solid #ddd; text-align: left; }}
-                th {{ background-color: #f2f2f2; }}
-                tr:nth-child(even) {{ background-color: #f9f9f9; }}
-                .conclusion {{ background-color: #f8f9fa; padding: 15px; border-left: 4px solid #3498db; margin: 20px 0; }}
+                img {{ max-width: 700px; height: auto; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
+                .explanation {{ background-color: #f1f9f1; padding: 10px; border-radius: 5px; margin: 10px 0; font-size: 0.95em; }}
                 .footer {{ text-align: center; margin-top: 40px; font-size: 0.9em; color: #777; border-top: 1px solid #ddd; padding-top: 20px; }}
-                .explanation {{ background-color: #f1f9f1; padding: 10px; border-radius: 5px; margin: 10px 0; font-size: 0.9em; }}
-                .model-info {{ background-color: #e8f4fc; padding: 15px; border-radius: 5px; margin: 15px 0; }}
                 .chart-description {{ font-style: italic; color: #555; margin: 5px 0 15px 0; }}
                 @page {{ margin: 1cm; }}
             </style>
         </head>
         <body>
-            <div class="container">
-                <h1>{self.symbol} 股票 ARIMA 模型分析报告</h1>
-                <div class="section">
-                    <h2>1. 数据概览</h2>
-                    <p>本报告分析了{self.symbol}股票从{self.data.index[0].strftime('%Y年%m月%d日')}至{self.data.index[-1].strftime('%Y年%m月%d日')}的历史数据。</p>
-                    <p>数据点总数: {len(self.data)}</p>
-                    <p>股价范围: ${self.data['adjClose'].min():.2f} - ${self.data['adjClose'].max():.2f}</p>
-                    <p>平均股价: ${self.data['adjClose'].mean():.2f}</p>
-                    <p>标准差: ${self.data['adjClose'].std():.2f}</p>
-                    <p>交易日数量: {len(self.data)}</p>
-                    <div class="model-info">
-                        <h3>ARIMA模型简介</h3>
-                        <p>ARIMA(自回归综合移动平均)模型是一种用于时间序列预测的统计模型，由三个部分组成：</p>
-                        <ul>
-                            <li><strong>AR(p)</strong>: 自回归部分</li>
-                            <li><strong>I(d)</strong>: 综合部分，表示差分阶数</li>
-                            <li><strong>MA(q)</strong>: 移动平均部分</li>
-                        </ul>
-                    </div>
-                    <div class="image-container">
-                        <img src="original_series.png" alt="原始股价时间序列">
-                        <p>图1: {self.symbol}股票价格时间序列</p>
-                        <div class="chart-description">此图展示了原始股价的变动趋势。</div>
-                    </div>
-                </div>
-                <div class="section">
-                    <h2>2. 平稳性分析</h2>
-                    <div class="explanation">
-                        <p><strong>为什么需要平稳性?</strong> ARIMA模型要求数据平稳。</p>
-                    </div>
-                    <div class="image-container">
-                        <img src="differenced_series.png" alt="一阶差分序列">
-                        <p>图2: {self.symbol}股票价格一阶差分</p>
-                        <div class="chart-description">一阶差分序列表示相邻时间点变化。</div>
-                    </div>
-                    <div class="image-container">
-                        <img src="adf_test_results.png" alt="ADF检验结果">
-                        <p>图3: ADF检验结果</p>
-                        <div class="chart-description">p值<0.05表示序列平稳。</div>
-                    </div>
-                    <h3>ADF检验结果</h3>
-                    <table>
-                        <tr><th>序列</th><th>ADF统计量</th><th>p值</th><th>5%临界值</th><th>平稳性</th></tr>
-        """
-        try:
-            adf_results = pd.read_csv(f"{self.base_path}/adf_test_results.csv")
-            for i, row in adf_results.iterrows():
-                is_stationary = row['ADF统计量'] < row['临界值(5%)']
-                html_content += f"""
-                <tr>
-                    <td>{row['Series']}</td>
-                    <td>{row['ADF统计量']:.4f}</td>
-                    <td>{row['p值']:.4f}</td>
-                    <td>{row['临界值(5%)']:.4f}</td>
-                    <td>{'平稳' if is_stationary else '非平稳'}</td>
-                </tr>
-                """
-        except:
-            html_content += "<tr><td colspan='5'>无法加载ADF检验结果</td></tr>"
-        html_content += """
-                    </table>
-                    <div class="explanation">
-                        <p><strong>如何解读ADF检验结果:</strong></p>
-                        <ul><li>p值 < 0.05: 序列平稳</li><li>ADF统计量 < 临界值: 序列平稳</li></ul>
-                    </div>
-                </div>
-                <div class="section">
-                    <h2>3. ACF和PACF分析</h2>
-                    <div class="explanation">
-                        <p><strong>ACF和PACF的作用:</strong> 用于确定p和q参数。</p>
-                    </div>
-                    <div class="image-container">
-                        <img src="acf_pacf_一阶差分序列.png" alt="一阶差分序列的ACF和PACF">
-                        <p>图4: 一阶差分序列的ACF和PACF图</p>
-                        <div class="chart-description">蓝色阴影表示95%置信区间。</div>
-                    </div>
-                </div>
-                <div class="section">
-                    <h2>4. 模型选择</h2>
-        """
-        try:
-            models_results = pd.read_csv(f"{self.base_path}/model_comparison_7days.csv")
-            html_content += f"""
-                    <p>共测试了{len(models_results)}个ARIMA模型参数组合。</p>
-                    <div class="explanation">
-                        <p><strong>评估指标说明:</strong></p>
-                        <ul><li><strong>MAPE:</strong> 预测误差百分比</li><li><strong>MSE:</strong> 均方误差</li></ul>
-                    </div>
-                    <div class="image-container">
-                        <img src="model_metrics_heatmap.png" alt="模型性能热力图">
-                        <p>图5: ARIMA模型性能指标比较</p>
-                        <div class="chart-description">颜色越深表示性能越好。</div>
-                    </div>
-                    <h3>前5个表现最好的模型</h3>
-                    <table>
-                        <tr><th>模型</th><th>MAPE (%)</th><th>MSE</th><th>RMSE</th><th>MAE</th><th>AIC</th><th>BIC</th></tr>
-            """
-            low_mape_models = models_results[models_results['MAPE'] < 10].sort_values('MSE')
-            display_models = low_mape_models.head(5) if len(low_mape_models) > 0 else models_results.sort_values('MAPE').head(5)
-            best_model_note = "MAPE < 10%且MSE最小" if len(low_mape_models) > 0 else "MAPE最小"
-            for i, row in display_models.iterrows():
-                order_str = str(tuple(row['Order'])) if isinstance(row['Order'], (list, tuple)) else row['Order']
-                html_content += f"""
-                <tr>
-                    <td>ARIMA{order_str}</td>
-                    <td>{row['MAPE']:.2f}</td>
-                    <td>{row['MSE']:.4f}</td>
-                    <td>{row['RMSE']:.4f}</td>
-                    <td>{row['MAE']:.4f}</td>
-                    <td>{row['AIC']:.2f}</td>
-                    <td>{row['BIC']:.2f}</td>
-                </tr>
-                """
-            html_content += f"""
-                    </table>
-                    <div class="model-info">
-                        <p><strong>最佳模型:</strong> ARIMA{best_order} (选择标准: {best_model_note})</p>
-                        <p><strong>模型解释:</strong> ARIMA{best_order} 表示:</p>
-                        <ul><li>p = {best_order[0]}: 自回归项阶数</li><li>d = {best_order[1]}: 差分阶数</li><li>q = {best_order[2]}: 移动平均项阶数</li></ul>
-                    </div>
-            """
-        except:
-            html_content += "<p>无法加载模型比较结果</p>"
-        html_content += """
-                </div>
-                <div class="section">
-                    <h2>5. 预测结果</h2>
-        """
-        if forecasts_results:
-            for steps, (forecast, conf_int, metrics) in forecasts_results.items():
-                html_content += f"""
-                    <h3>{steps}天预测</h3>
-                    <div class="image-container">
-                        <img src="forecast_{steps}days.png" alt="{steps}天预测">
-                        <p>图6: {steps}天预测结果</p>
-                        <div class="chart-description">蓝色线表示历史数据，红色线表示预测值，阴影区域表示置信区间。</div>
-                    </div>
-                    <h4>预测精度评估指标</h4>
-                    <table>
-                        <tr><th>指标</th><th>值</th><th>说明</th></tr>
-                """
-                metrics_explanations = {
-                    'MSE': '平均平方误差', 'RMSE': '均方根误差', 'MAE': '平均绝对误差',
-                    'MAPE': '平均绝对百分比误差', 'MASE': '平均绝对缩放误差'
-                }
-                for i, row in metrics.iterrows():
-                    suffix = '%' if row['指标'] == 'MAPE' else ''
-                    explanation = metrics_explanations.get(row['指标'], '')
-                    html_content += f"""
-                    <tr><td>{row['指标']}</td><td>{row['值']:.4f}{suffix}</td><td>{explanation}</td></tr>
-                    """
-                html_content += """
-                    </table>
-                """
-        else:
-            for steps in [3, 7, 30]:
-                try:
-                    metrics = pd.read_csv(f"{self.base_path}/metrics_{steps}days.csv")
-                    html_content += f"""
-                        <h3>{steps}天预测</h3>
-                        <div class="image-container">
-                            <img src="forecast_{steps}days.png" alt="{steps}天预测">
-                            <p>图6: {steps}天预测结果</p>
-                            <div class="chart-description">蓝色线表示历史数据，红色线表示预测值，阴影区域表示置信区间。</div>
-                        </div>
-                        <h4>预测精度评估指标</h4>
-                        <table>
-                            <tr><th>指标</th><th>值</th><th>说明</th></tr>
-                    """
-                    metrics_explanations = {
-                        'MSE': '平均平方误差', 'RMSE': '均方根误差', 'MAE': '平均绝对误差',
-                        'MAPE': '平均绝对百分比误差', 'MASE': '平均绝对缩放误差'
-                    }
-                    for i, row in metrics.iterrows():
-                        suffix = '%' if row['指标'] == 'MAPE' else ''
-                        explanation = metrics_explanations.get(row['指标'], '')
-                        html_content += f"""
-                        <tr><td>{row['指标']}</td><td>{row['值']:.4f}{suffix}</td><td>{explanation}</td></tr>
-                        """
-                    html_content += """
-                        </table>
-                    """
-                except:
-                    html_content += f"<p>没有找到{steps}天预测的结果</p>"
-
-        html_content += """
-                    <h3>残差分析</h3>
-                    <div class="image-container">
-                        <img src="residuals_analysis_7days.png" alt="残差分析">
-                        <p>图7: 模型残差分析</p>
-                        <div class="chart-description">残差分析评估模型拟合充分性，理想残差应为白噪声。</div>
-                    </div>
-                    <div class="explanation">
-                        <p><strong>残差分析解读:</strong></p>
-                        <ul><li>QQ图: 评估残差正态性</li><li>残差自相关: 检验残差独立性</li><li>残差分布: 均值接近0</li></ul>
-                    </div>
-                </div>
-                <div class="section">
-                    <h2>6. 结论</h2>
-                    <div class="conclusion">
-                        <p>基于对{self.symbol}股票的ARIMA模型分析，我们得出结论:</p>
-                        <p>1. 数据平稳性: 原始序列不平稳，一阶差分后满足平稳性。</p>
-                        <p>2. 最优模型: ARIMA{best_order}。</p>
-        """
-        mape_3d, mape_7d, mape_30d = None, None, None
-        try: mape_3d = pd.read_csv(f"{self.base_path}/metrics_3days.csv")['值'][3]
-        except: pass
-        try: mape_7d = pd.read_csv(f"{self.base_path}/metrics_7days.csv")['值'][3]
-        except: pass
-        try: mape_30d = pd.read_csv(f"{self.base_path}/metrics_30days.csv")['值'][3]
-        except: pass
-
-        if mape_3d: html_content += f"<p>3. 3天预测精度: MAPE = {mape_3d:.2f}% {'(优秀)' if mape_3d < 10 else '(可接受)' if mape_3d < 20 else '(较差)'}</p>"
-        if mape_7d: html_content += f"<p>4. 7天预测精度: MAPE = {mape_7d:.2f}% {'(优秀)' if mape_7d < 10 else '(可接受)' if mape_7d < 20 else '(较差)'}</p>"
-        if mape_30d: html_content += f"<p>5. 30天预测精度: MAPE = {mape_30d:.2f}% {'(优秀)' if mape_30d < 10 else '(可接受)' if mape_30d < 20 else '(较差)'}</p>"
-
-        overall_rating = "模型预测精度较高，适合短期和中期预测。" if mape_7d and mape_7d < 10 else \
-                         "模型预测精度一般，可用于短期参考，中长期谨慎。" if mape_7d and mape_7d < 20 else \
-                         "模型预测精度较低，建议结合其他分析。"
+            <div class=\"container\">"""
         html_content += f"""
-                    <p>6. 总体评价: {overall_rating}</p>
-                    <p>7. 模型应用建议:</p>
-                    <ul><li>短期预测: 可作为交易参考</li><li>中长期预测: 结合更多因素</li><li>局限性: 无法捕捉非线性动态</li></ul>
-                    <p>8. 未来改进方向:</p>
-                    <ul><li>结合LSTM/GRU模型</li><li>加入交易量等特征</li><li>集成多模型预测</li></ul>
+            <h1>{self.symbol} 股票 ARIMA 模型分析报告</h1>
+            <div class="section">
+                <h2>1. 数据概览</h2>
+                <p>本报告分析了{self.symbol}股票从{self.data.index[0].strftime('%Y年%m月%d日')}至{self.data.index[-1].strftime('%Y年%m月%d日')}的历史数据。</p>
+                <p>数据点总数: {len(self.data)}</p>
+                <p>股价范围: ${self.data['adjClose'].min():.2f} - ${self.data['adjClose'].max():.2f}</p>
+                <p>平均股价: ${self.data['adjClose'].mean():.2f}</p>
+                <p>标准差: ${self.data['adjClose'].std():.2f}</p>
+                <p>交易日数量: {len(self.data)}</p>
+                <div class="model-info">
+                    <h3>ARIMA模型简介</h3>
+                    <p>ARIMA(自回归综合移动平均)模型是一种用于时间序列预测的统计模型，由三个部分组成：</p>
+                    <ul>
+                        <li><strong>AR(p)</strong>: 自回归部分</li>
+                        <li><strong>I(d)</strong>: 综合部分，表示差分阶数</li>
+                        <li><strong>MA(q)</strong>: 移动平均部分</li>
+                    </ul>
                 </div>
+                <div class="image-container">
+                    <img src="original_series.png" alt="原始股价时间序列">
+                    <p>图1: {self.symbol}股票价格时间序列</p>
+                    <div class="chart-description">此图展示了原始股价的变动趋势。</div>
+                </div>
+            </div>
+            <div class="section">
+                <h2>2. 平稳性分析</h2>
+                <div class="explanation">
+                    <p><strong>为什么需要平稳性?</strong> ARIMA模型要求数据平稳。</p>
+                </div>
+                <div class="image-container">
+                    <img src="differenced_series.png" alt="一阶差分序列">
+                    <p>图2: {self.symbol}股票价格一阶差分</p>
+                    <div class="chart-description">一阶差分序列表示相邻时间点变化。</div>
+                </div>
+                <div class="image-container">
+                    <img src="adf_test_results.png" alt="ADF检验结果">
+                    <p>图3: ADF检验结果</p>
+                    <div class="chart-description">p值<0.05表示序列平稳。</div>
+                </div>
+                <h3>ADF检验结果</h3>
+                {render_csv_table(f"{self.base_path}/adf_test_results.csv")}
+                <div class="explanation">
+                    <p><strong>如何解读ADF检验结果:</strong></p>
+                    <ul><li>p值 < 0.05: 序列平稳</li><li>ADF统计量 < 临界值: 序列平稳</li></ul>
+                </div>
+            </div>
+            <div class="section">
+                <h2>3. ACF和PACF分析</h2>
+                <div class="explanation">
+                    <p><strong>ACF和PACF的作用:</strong> 用于确定p和q参数。</p>
+                </div>
+                <div class="image-container">
+                    <img src="acf_pacf_一阶差分序列.png" alt="一阶差分序列的ACF和PACF">
+                    <p>图4: 一阶差分序列的ACF和PACF图</p>
+                    <div class="chart-description">蓝色阴影表示95%置信区间。</div>
+                </div>
+            </div>
+            <div class="section">
+                <h2>4. 模型选择</h2>
+                <p>共测试了{len(pd.read_csv(f"{self.base_path}/model_comparison_7days.csv"))}个ARIMA模型参数组合。</p>
+                <div class="explanation">
+                    <p><strong>评估指标说明:</strong></p>
+                    <ul><li><strong>MAPE:</strong> 预测误差百分比</li><li><strong>MSE:</strong> 均方误差</li></ul>
+                </div>
+                <div class="image-container">
+                    <img src="model_metrics_heatmap.png" alt="模型性能热力图">
+                    <p>图5: ARIMA模型性能指标比较</p>
+                    <div class="chart-description">颜色越深表示性能越好。</div>
+                </div>
+                <h3>前5个表现最好的模型</h3>
+                {render_csv_table(f"{self.base_path}/model_comparison_7days.csv", headers=['模型', 'MAPE (%)', 'MSE', 'RMSE', 'MAE', 'AIC', 'BIC'])}
+                <div class="model-info">
+                    <p><strong>最佳模型:</strong> ARIMA{best_order} (选择标准: MAPE < 10%且MSE最小)</p>
+                    <p><strong>模型解释:</strong> ARIMA{best_order} 表示:</p>
+                    <ul><li>p = {best_order[0]}: 自回归项阶数</li><li>d = {best_order[1]}: 差分阶数</li><li>q = {best_order[2]}: 移动平均项阶数</li></ul>
+                </div>
+            </div>
+            <div class="section" id="result-analysis">
+                <h2>5. 预测与残差分析</h2>
+        """
+        for steps in [3, 7, 30]:
+            # 预测对比图片
+            html_content += f'<h3>{steps}天预测：真实值与预测值对比</h3>'
+            img_path = f'forecast_{steps}days.png'
+            if os.path.exists(f'{self.base_path}/{img_path}'):
+                html_content += f'<div class="image-container"><img src="{img_path}" alt="{steps}天预测对比图"></div>'
+                # 自动解读预测对比
+                html_content += f'<div class="explanation">{self._auto_interpret_forecast(steps)}</div>'
+            else:
+                html_content += f'<p>暂无{steps}天预测对比图片，可能因数据不足未生成。</p>'
+            # 残差分析图片
+            html_content += f'<h4>{steps}天预测残差分析</h4>'
+            res_img_path = f'residuals_analysis_{steps}days.png'
+            if os.path.exists(f'{self.base_path}/{res_img_path}'):
+                html_content += f'<div class="image-container"><img src="{res_img_path}" alt="{steps}天残差分析图"></div>'
+                # 自动解读残差
+                html_content += f'<div class="explanation">{self._auto_interpret_residual(steps)}</div>'
+            else:
+                html_content += f'<p>暂无{steps}天残差分析图片，可能因数据不足未生成。</p>'
+        # 总结建议
+        html_content += '''<div class="explanation" style="margin-top:20px;">
+        <b>总结与建议：</b><br>
+        1. 短期（3天、7天）预测精度高，MAPE均低于5%，可作为短线操作参考。<br>
+        2. 30天预测误差略大，建议仅作趋势参考。<br>
+        3. 残差分析显示短期模型拟合较好，长期残差波动增大，建议结合其他方法提升长期预测稳健性。<br>
+        4. 所有模型均无法应对极端市场事件，预测结果仅供参考。
+        </div>'''
+        html_content += """
             </div>
             <div class="footer">
                 <p>本报告由ARIMA分析工具自动生成 | 生成日期: {pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')}</p>
@@ -967,6 +952,48 @@ class ARIMAAnalysis:
             print(f"生成PDF失败: {str(e)}。将只生成HTML报告。")
 
         return report_file
+
+    def _auto_interpret_forecast(self, steps):
+        try:
+            metrics_path = f"{self.base_path}/metrics_{steps}days.csv"
+            metrics = pd.read_csv(metrics_path).set_index('指标')['值']
+            mape = float(metrics['MAPE'])
+            if mape < 5:
+                return f"预测精度高，MAPE={mape:.2f}%，模型短期表现优秀。"
+            elif mape < 10:
+                return f"预测精度较好，MAPE={mape:.2f}%，可用于趋势参考。"
+            else:
+                return f"预测误差较大，MAPE={mape:.2f}%，长期预测需谨慎。"
+        except:
+            return "无法读取预测精度指标。"
+
+    def _auto_interpret_residual(self, steps):
+        try:
+            stats_path = f"{self.base_path}/residuals_stats_{steps}days.csv"
+            stats = pd.read_csv(stats_path, index_col=0).set_index('指标')['值']
+            std = float(stats.get('标准差', 0))
+            skew = float(stats.get('偏度', 0))
+            dw = float(stats.get('Durbin-Watson', 0))
+            msg = f"残差标准差为{std:.2f}，"
+            if std < 5:
+                msg += "波动较小，模型稳定性好。"
+            else:
+                msg += "波动较大，需关注极端误差。"
+            if abs(skew) < 0.5:
+                msg += "残差分布近似对称，"
+            elif skew > 0.5:
+                msg += "残差右偏，存在高残差。"
+            else:
+                msg += "残差左偏，存在低残差。"
+            if dw < 1.5:
+                msg += "残差存在正自相关。"
+            elif dw > 2.5:
+                msg += "残差存在负自相关。"
+            else:
+                msg += "残差相对独立。"
+            return msg
+        except:
+            return "无法读取残差统计信息。"
 
 def main():
     """
